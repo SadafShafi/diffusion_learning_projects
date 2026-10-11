@@ -1,0 +1,7 @@
+checkpoints/*
+venv/
+logs/
+outputs/*
+__pycache__/
+data/
+venv_old_delete_me/

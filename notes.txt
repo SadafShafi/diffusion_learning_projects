@@ -1,0 +1,98 @@
+=====================================================================
+ ALL EXPERIMENTS - copy/paste from the project folder
+=====================================================================
+Pattern:   sbatch [slurm options] train.sh <script.py> [script options]
+  - train.sh = train + test in one job (--mode all)
+  - run name: automatic <model>_<dataset>_<timestamp>  (or add --run_name NAME)
+  - results:  outputs/<run_name>/   checkpoint: checkpoints/<run_name>.pt   log: logs/train_<jobid>.out
+  - watch:    squeue -u $USER          tail -f logs/train_<jobid>.out
+  - cancel:   scancel <jobid>
+
+Partitions (check what's free: sinfo -p grete,grete:interactive -t mixed,idle -N -O "NodeList,Gres:45,GresUsed:60"):
+  - grete              full A100, often a queue
+  - grete:interactive  slices of an A100 (MIG), usually free, max 12h
+        1g.10gb (1/7 A100), 2g.20gb (2/7), 3g.40gb (3/7)
+
+0) ONCE, on the login node (internet needed)
+---------------------------------------------------------------------
+bash prepare.sh
+
+
+=====================================================================
+ STAGE 1.1  DDPM on 2D toy data   (ddpm_2d_Sg1_1.py, MLP, ~ minutes)
+=====================================================================
+sbatch -p grete:interactive --gpus=1g.10gb:1 --time=00:45:00 train.sh ddpm_2d_Sg1_1.py --dataset spiral
+sbatch -p grete:interactive --gpus=1g.10gb:1 --time=00:45:00 train.sh ddpm_2d_Sg1_1.py --dataset moons
+
+# optional experiments
+# fewer diffusion steps -> worse? (watch reverse_process.png / chamfer)
+sbatch -p grete:interactive --gpus=1g.10gb:1 --time=00:45:00 train.sh ddpm_2d_Sg1_1.py --dataset spiral --T 100
+# smaller network -> blurrier spiral?
+sbatch -p grete:interactive --gpus=1g.10gb:1 --time=00:45:00 train.sh ddpm_2d_Sg1_1.py --dataset spiral --hidden 32
+# (CPU is fine too, no slurm needed:  source venv/bin/activate && python ddpm_2d_Sg1_1.py --mode all --dataset spiral)
+
+
+=====================================================================
+ STAGE 1.2  DDPM on images   (ddpm_images_Sg1_2.py, U-Net)
+=====================================================================
+# --- MNIST first (20k steps, ~1.2M params). Expect ~30 min train + ~15 min test (FID) on a 3g slice
+sbatch -p grete:interactive --gpus=3g.40gb:1 --time=02:00:00 train.sh ddpm_images_Sg1_2.py --dataset mnist
+
+# --- CIFAR-10 (100k steps, ~4.8M params). Needs a full A100: several hours
+sbatch --time=08:00:00 train.sh ddpm_images_Sg1_2.py --dataset cifar10
+
+# --- re-test a finished run with more FID samples (more reliable number)
+# sbatch test.sh ddpm_images_Sg1_2.py --run_name <run_name> --n_fid 10000
+
+# optional experiments (compare FID in results.json, only with same --n_fid)
+# bigger CIFAR model (closer to the DDPM paper)
+# sbatch --time=12:00:00 train.sh ddpm_images_Sg1_2.py --dataset cifar10 --base_ch 128 --ch_mults 1,2,2,2 --attn_levels 1
+# attention only in the middle block (none in the encoder/decoder levels) -> does it matter?
+# sbatch --time=08:00:00 train.sh ddpm_images_Sg1_2.py --dataset cifar10 --attn_levels 9
+# no EMA (decay 0 = just the raw weights) -> noisier samples
+# sbatch -p grete:interactive --gpus=3g.40gb:1 --time=02:00:00 train.sh ddpm_images_Sg1_2.py --dataset mnist --ema_decay 0
+
+# --- extra experiments on a trained run (test.sh + --mode ...; last --mode wins)
+# NOTE: until venv is replaced by venv_cu128, add  --export=ALL,VENV=venv_cu128  to every sbatch
+# grete:interactive allows max 2 jobs per user at a time
+# where is the digit decided? (MNIST only, ~10-15 min)
+sbatch -p grete:interactive --gpus=3g.40gb:1 --time=01:00:00 test.sh ddpm_images_Sg1_2.py --run_name <mnist run> --mode identity_curve
+# nearest training images during sampling + memorisation check (MNIST or CIFAR)
+sbatch -p grete:interactive --gpus=3g.40gb:1 --time=00:30:00 test.sh ddpm_images_Sg1_2.py --run_name <run> --mode nearest
+
+
+=====================================================================
+ STAGE 2.1 (project 3)  Samplers: DDIM, Euler, Heun   (samplers_Sg2_1.py, no training)
+=====================================================================
+# samples an already trained Stage 1.2 run; ~1-2 h on a 3g slice (FID for every sampler/steps)
+sbatch -p grete:interactive --gpus=3g.40gb:1 --time=03:00:00 test.sh samplers_Sg2_1.py --ckpt_run <cifar run>
+# quick version: only the same-noise grid, no FID (minutes)
+# sbatch -p grete:interactive --gpus=1g.10gb:1 --time=00:30:00 test.sh samplers_Sg2_1.py --ckpt_run <run> --n_fid 0
+# outputs/Samplers_<dataset>_<time>/: fid_vs_nfe.png, same_noise_grid.png, results.json
+
+
+=====================================================================
+ STAGE 2.2 (project 4)  Class conditioning + classifier-free guidance   (cfg_Sg2_2.py)
+=====================================================================
+# trains a NEW class-conditional U-Net (labels dropped 10% of the time), then sweeps guidance scale w
+sbatch -p grete:interactive --gpus=3g.40gb:1 --time=01:30:00 train.sh cfg_Sg2_2.py --dataset mnist
+sbatch --time=04:00:00 train.sh cfg_Sg2_2.py --dataset cifar10
+# re-test with other guidance scales:
+# sbatch test.sh cfg_Sg2_2.py --run_name <run> --ws 0,1,2,3,5,8
+# outputs/UNetCFG_<dataset>_<time>/: class_grid.png, fid_vs_guidance.png, progress/, results.json
+# relabel test: same noised image denoised with every label -> relabel.png (MNIST runs fine on CPU too)
+# sbatch -p grete:interactive --gpus=1g.10gb:1 --time=00:30:00 test.sh cfg_Sg2_2.py --run_name <run> --mode relabel
+#   options: --relabel_ts 300,500,700  --relabel_w 3  --n_images 4
+
+
+What to look at in outputs/<run_name>/:
+  progress_overview.png   how samples improve during training
+  samples.png             real vs generated
+  input_output_grid.png   noise a real image to t, denoise back
+  input_output_steps.png  the steps in between
+  x0_prediction.png       model's one-step guess of the clean image at each t
+  reverse_process.png     pure noise -> image
+  results.json            loss, FID, times, nearest-neighbour distances
+  nearest_neighbours.png  model's guess during sampling + its closest TRAINING image
+  nearest_final.png       final samples next to their closest training image
+  identity_curve.png      P(same digit) vs t  (+ identity_examples.png, identity_curve.json)

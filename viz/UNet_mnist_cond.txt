@@ -1,0 +1,183 @@
+UNet(
+  (class_emb): Embedding(11, 128)
+  (time_emb): Sequential(
+    (0): SinusoidalTimeEmbedding()
+    (1): Linear(in_features=32, out_features=128, bias=True)
+    (2): SiLU()
+    (3): Linear(in_features=128, out_features=128, bias=True)
+  )
+  (conv_in): Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (down): ModuleList(
+    (0): Module(
+      (blocks): ModuleList(
+        (0-1): 2 x ResBlock(
+          (norm1): GroupNorm(8, 32, eps=1e-05, affine=True)
+          (conv1): Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=32, bias=True)
+          (norm2): GroupNorm(8, 32, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Identity()
+        )
+      )
+      (attn): Identity()
+      (downsample): Downsample(
+        (conv): Conv2d(32, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+      )
+    )
+    (1): Module(
+      (blocks): ModuleList(
+        (0): ResBlock(
+          (norm1): GroupNorm(8, 32, eps=1e-05, affine=True)
+          (conv1): Conv2d(32, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=64, bias=True)
+          (norm2): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Conv2d(32, 64, kernel_size=(1, 1), stride=(1, 1))
+        )
+        (1): ResBlock(
+          (norm1): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=64, bias=True)
+          (norm2): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Identity()
+        )
+      )
+      (attn): Identity()
+      (downsample): Downsample(
+        (conv): Conv2d(64, 64, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+      )
+    )
+    (2): Module(
+      (blocks): ModuleList(
+        (0-1): 2 x ResBlock(
+          (norm1): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=64, bias=True)
+          (norm2): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Identity()
+        )
+      )
+      (attn): AttentionBlock(
+        (norm): GroupNorm(8, 64, eps=1e-05, affine=True)
+        (qkv): Conv2d(64, 192, kernel_size=(1, 1), stride=(1, 1))
+        (proj): Conv2d(64, 64, kernel_size=(1, 1), stride=(1, 1))
+      )
+      (downsample): Identity()
+    )
+  )
+  (mid1): ResBlock(
+    (norm1): GroupNorm(8, 64, eps=1e-05, affine=True)
+    (conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (time_proj): Linear(in_features=128, out_features=64, bias=True)
+    (norm2): GroupNorm(8, 64, eps=1e-05, affine=True)
+    (dropout): Dropout(p=0.1, inplace=False)
+    (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (skip): Identity()
+  )
+  (mid_attn): AttentionBlock(
+    (norm): GroupNorm(8, 64, eps=1e-05, affine=True)
+    (qkv): Conv2d(64, 192, kernel_size=(1, 1), stride=(1, 1))
+    (proj): Conv2d(64, 64, kernel_size=(1, 1), stride=(1, 1))
+  )
+  (mid2): ResBlock(
+    (norm1): GroupNorm(8, 64, eps=1e-05, affine=True)
+    (conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (time_proj): Linear(in_features=128, out_features=64, bias=True)
+    (norm2): GroupNorm(8, 64, eps=1e-05, affine=True)
+    (dropout): Dropout(p=0.1, inplace=False)
+    (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (skip): Identity()
+  )
+  (up): ModuleList(
+    (0): Module(
+      (blocks): ModuleList(
+        (0): ResBlock(
+          (norm1): GroupNorm(8, 128, eps=1e-05, affine=True)
+          (conv1): Conv2d(128, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=64, bias=True)
+          (norm2): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Conv2d(128, 64, kernel_size=(1, 1), stride=(1, 1))
+        )
+        (1): ResBlock(
+          (norm1): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=64, bias=True)
+          (norm2): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Identity()
+        )
+      )
+      (attn): AttentionBlock(
+        (norm): GroupNorm(8, 64, eps=1e-05, affine=True)
+        (qkv): Conv2d(64, 192, kernel_size=(1, 1), stride=(1, 1))
+        (proj): Conv2d(64, 64, kernel_size=(1, 1), stride=(1, 1))
+      )
+      (upsample): Upsample(
+        (conv): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      )
+    )
+    (1): Module(
+      (blocks): ModuleList(
+        (0): ResBlock(
+          (norm1): GroupNorm(8, 128, eps=1e-05, affine=True)
+          (conv1): Conv2d(128, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=64, bias=True)
+          (norm2): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Conv2d(128, 64, kernel_size=(1, 1), stride=(1, 1))
+        )
+        (1): ResBlock(
+          (norm1): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=64, bias=True)
+          (norm2): GroupNorm(8, 64, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Identity()
+        )
+      )
+      (attn): Identity()
+      (upsample): Upsample(
+        (conv): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      )
+    )
+    (2): Module(
+      (blocks): ModuleList(
+        (0): ResBlock(
+          (norm1): GroupNorm(8, 96, eps=1e-05, affine=True)
+          (conv1): Conv2d(96, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=32, bias=True)
+          (norm2): GroupNorm(8, 32, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Conv2d(96, 32, kernel_size=(1, 1), stride=(1, 1))
+        )
+        (1): ResBlock(
+          (norm1): GroupNorm(8, 32, eps=1e-05, affine=True)
+          (conv1): Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (time_proj): Linear(in_features=128, out_features=32, bias=True)
+          (norm2): GroupNorm(8, 32, eps=1e-05, affine=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (conv2): Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (skip): Identity()
+        )
+      )
+      (attn): Identity()
+      (upsample): Identity()
+    )
+  )
+  (norm_out): GroupNorm(8, 32, eps=1e-05, affine=True)
+  (conv_out): Conv2d(32, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+)
+
+Total parameters: 1,203,617
