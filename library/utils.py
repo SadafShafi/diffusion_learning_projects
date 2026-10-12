@@ -13,10 +13,13 @@ def set_seed(seed):
     torch.manual_seed(seed)
 
 
-def make_run_name(model_name, dataset):
-    """Default run name: <model>_<dataset>_<timestamp>, e.g. UNet_mnist_20261011-1530"""
+def make_run_name(stage, method, model, dataset, tag=None):
+    """Default run name:  <stage>_<method>_<model>_<dataset>[_<tag>]_<YYYYMMDD-HHMM>
+    e.g. S2.3_flow_unet_cifar10_20261011-2149   or   S1.2_ddpm_unet_mnist_noema_20261012-1010
+    All settings are in config.json inside the run folder; the tag says what you changed."""
     from datetime import datetime
-    return f"{model_name}_{dataset}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    parts = [stage, method, model, dataset] + ([tag] if tag else []) + [datetime.now().strftime("%Y%m%d-%H%M")]
+    return "_".join(parts)
 
 
 def save_checkpoint(path, model, config, losses, **extra):

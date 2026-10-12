@@ -19,6 +19,7 @@ import numpy as np
 import torch
 
 from library.ddpm import DDPM
+from library.flow import FlowMatching
 from library.models import MLP
 from library.data2d import get_data
 from library.utils import get_device, set_seed, save_checkpoint, load_checkpoint, make_run_name
@@ -30,7 +31,11 @@ OUT_DIR = "outputs"
 
 def build(config, device):
     model = MLP(data_dim=2, hidden=config["hidden"], n_layers=config["n_layers"]).to(device)
-    ddpm = DDPM(T=config["T"], device=device)
+    # --method ddpm (Stage 1.1) or flow (Stage 2.3): same MLP, different training target + sampler
+    if config.get("method", "ddpm") == "flow":
+        ddpm = FlowMatching(T=config["T"], device=device)
+    else:
+        ddpm = DDPM(T=config["T"], device=device)
     return model, ddpm
 
 
@@ -98,9 +103,36 @@ def test(args, run_dir, device):
         "final_train_loss": float(np.mean(ckpt["losses"][-1000:])),
         **sample_quality(real, samples),
     }
+    if config.get("method") == "flow":
+        results["chamfer_vs_euler_steps"] = flow_steps_sweep(model, real, args, device, run_dir)
     with open(os.path.join(run_dir, "results.json"), "w") as f:
         json.dump(results, f, indent=2)
     print(json.dumps(results, indent=2))
+
+
+@torch.no_grad()
+def flow_steps_sweep(model, real, args, device, run_dir):
+    """Flow matching only: sample quality (chamfer) and sample paths for few Euler steps.
+    Straight paths -> even a handful of steps gives a good spiral."""
+    steps = [int(v) for v in args.fm_steps.split(",")]
+    z = torch.randn(len(real), 2, device=device)            # same noise for every step count
+    rows = []
+    fig, axes = plt.subplots(1, len(steps), figsize=(3.2 * len(steps), 3.4))
+    for ax, n in zip(axes, steps):
+        fm = FlowMatching(T=n, device=device)
+        x, traj = fm.sample(model, z.shape, return_trajectory=True, x_start=z, t_start=n - 1)
+        x = x.cpu()
+        q = sample_quality(real, x)
+        rows.append({"steps": n, **q})
+        ax.scatter(x[:, 0], x[:, 1], s=1, c="tab:orange")
+        for i in range(15):
+            ax.plot(traj[:, i, 0], traj[:, i, 1], lw=0.8, color="black", alpha=0.6)
+        _square(ax, f"{n} Euler steps\nchamfer {q['chamfer']:.3f}")
+    plt.suptitle("flow matching with few steps (black = paths of 15 points)")
+    plt.tight_layout()
+    plt.savefig(os.path.join(run_dir, "flow_few_steps.png"), dpi=120)
+    plt.close()
+    return rows
 
 
 def sample_quality(real, samples):
@@ -269,8 +301,8 @@ def plot_trajectories(traj, samples, run_dir, n_paths=30):
 
 @torch.no_grad()
 def plot_vector_field(model, ddpm, samples, device, run_dir):
-    """Arrows = -eps_theta(x, t): the direction the model wants to push x to remove noise.
-    (Proportional to the score grad log p_t(x) = -eps / sqrt(1 - alpha_bar_t).)"""
+    """Arrows = -model(x, t): the direction the model wants to push x towards the data.
+    DDPM: -eps (proportional to the score).  Flow: -velocity (the straight-line direction to the data)."""
     T = ddpm.T
     ts = [int(T * 0.75), int(T * 0.25), int(T * 0.05), 0]
     g = torch.linspace(-LIM, LIM, 25)
@@ -280,10 +312,10 @@ def plot_vector_field(model, ddpm, samples, device, run_dir):
     fig, axes = plt.subplots(1, len(ts), figsize=(4.5 * len(ts), 4.5))
     for ax, t in zip(axes, ts):
         tt = torch.full((grid.shape[0],), t, device=device, dtype=torch.long)
-        v = -model(grid, tt).cpu()
+        v = -model(grid, ddpm.model_time(tt)).cpu()
         ax.scatter(samples[:, 0], samples[:, 1], s=1, c="lightgray")
         ax.quiver(grid[:, 0].cpu(), grid[:, 1].cpu(), v[:, 0], v[:, 1], color="tab:blue")
-        _square(ax, f"-eps_theta(x, t={t})")
+        _square(ax, f"-model(x, t={t})")
     plt.tight_layout()
     plt.savefig(os.path.join(run_dir, "vector_field.png"), dpi=120)
     plt.close()
@@ -295,10 +327,13 @@ def plot_vector_field(model, ddpm, samples, device, run_dir):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["train", "test", "all"], required=True, help="all = train then test")
-    p.add_argument("--run_name", default=None, help="default: MLP_<dataset>_<datetime>")
+    p.add_argument("--tag", default=None, help="short label for the run name, e.g. bigmodel or noema")
+    p.add_argument("--run_name", default=None, help="default: S1.1|S2.3_<method>_mlp_<dataset>[_<tag>]_<time>")
     p.add_argument("--dataset", choices=["spiral", "moons"], default="moons")
     # diffusion
-    p.add_argument("--T", type=int, default=1000)
+    p.add_argument("--method", choices=["ddpm", "flow"], default="ddpm", help="flow = Stage 2.3 flow matching")
+    p.add_argument("--T", type=int, default=None, help="DDPM steps (default 1000) or flow Euler steps (default 100)")
+    p.add_argument("--fm_steps", default="2,5,10,20,50,100", help="flow only: Euler steps for the quality sweep")
     # model
     p.add_argument("--hidden", type=int, default=128)
     p.add_argument("--n_layers", type=int, default=3)
@@ -312,10 +347,13 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
 
+    if args.T is None:
+        args.T = 100 if args.method == "flow" else 1000
     if args.run_name is None:
         if args.mode == "test":
             p.error("--run_name is required for test")
-        args.run_name = make_run_name("MLP", args.dataset)
+        stage = "S2.3" if args.method == "flow" else "S1.1"
+        args.run_name = make_run_name(stage, args.method, "mlp", args.dataset, args.tag)
 
     set_seed(args.seed)
     device = get_device()

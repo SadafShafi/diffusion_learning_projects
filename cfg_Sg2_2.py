@@ -231,7 +231,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["train", "test", "all", "relabel"], required=True,
                    help="all = train then test; relabel = same noised image with every label")
-    p.add_argument("--run_name", default=None, help="default: UNetCFG_<dataset>_<datetime>")
+    p.add_argument("--tag", default=None, help="short label for the run name, e.g. bigmodel or noema")
+    p.add_argument("--run_name", default=None, help="default: S2.2_cfg_unet_<dataset>[_<tag>]_<time>")
     p.add_argument("--dataset", choices=list(PRESETS), default="cifar10")
     p.add_argument("--T", type=int, default=1000)
     # model (None -> PRESETS from Stage 1.2)
@@ -269,7 +270,7 @@ def main():
     if args.run_name is None:
         if args.mode in ("test", "relabel"):
             p.error(f"--run_name is required for {args.mode}")
-        args.run_name = make_run_name("UNetCFG", args.dataset)
+        args.run_name = make_run_name("S2.2", "cfg", "unet", args.dataset, args.tag)
 
     set_seed(args.seed)
     device = get_device()

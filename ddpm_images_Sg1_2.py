@@ -29,6 +29,7 @@ import torch
 from torchvision.utils import make_grid
 
 from library.ddpm import DDPM
+from library.flow import FlowMatching
 from library.models import UNet
 from library.data_images import IMAGE_SHAPE, get_dataset, infinite_batches, load_all
 from library.fid import FID
@@ -54,7 +55,11 @@ def build(config, device):
     C, H, W = IMAGE_SHAPE[config["dataset"]]
     model = UNet(in_ch=C, base_ch=config["base_ch"], ch_mults=ints(config["ch_mults"]),
                  n_res=config["n_res"], attn_levels=ints(config["attn_levels"]), dropout=config["dropout"]).to(device)
-    ddpm = DDPM(T=config["T"], device=device)
+    # --method ddpm (Stage 1.2) or flow (Stage 2.3): same network, different training target + sampler
+    if config.get("method", "ddpm") == "flow":
+        ddpm = FlowMatching(T=config["T"], device=device)
+    else:
+        ddpm = DDPM(T=config["T"], device=device)
     return model, ddpm
 
 
@@ -183,9 +188,35 @@ def test(args, run_dir, device):
         mu_g, sig_g = FID.stats(np.concatenate(feats))
         results["fid"] = FID.score(mu_r, sig_r, mu_g, sig_g)
         results["n_fid"] = args.n_fid
+        if config.get("method") == "flow":
+            results["fid_vs_euler_steps"] = flow_steps_sweep(model, config, fid, mu_r, sig_r, shape, args, device, run_dir)
     with open(os.path.join(run_dir, "results.json"), "w") as f:
         json.dump(results, f, indent=2)
     print(json.dumps(results, indent=2))
+
+
+@torch.no_grad()
+def flow_steps_sweep(model, config, fid, mu_r, sig_r, shape, args, device, run_dir):
+    """Flow matching only: how many Euler steps are needed? (compare with outputs/Samplers_* of Stage 2.1)"""
+    rows = []
+    for n in [int(v) for v in args.fm_steps.split(",")]:
+        fm = FlowMatching(T=n, device=device)
+        feats = [fid.features(fm.sample(model, (min(args.sample_batch, args.n_fid - i), *shape)))
+                 for i in range(0, args.n_fid, args.sample_batch)]
+        score = FID.score(mu_r, sig_r, *FID.stats(np.concatenate(feats)))
+        rows.append({"steps": n, "fid": score})
+        print(f"  flow Euler steps={n:4d} | FID {score:.2f}", flush=True)
+    plt.figure(figsize=(6, 4))
+    plt.plot([r["steps"] for r in rows], [r["fid"] for r in rows], "o-")
+    plt.xscale("log")
+    plt.xlabel("Euler steps (= model calls)")
+    plt.ylabel("FID")
+    plt.title("Flow matching: quality vs number of steps")
+    plt.grid(alpha=0.3, which="both")
+    plt.tight_layout()
+    plt.savefig(os.path.join(run_dir, "fid_vs_steps.png"), dpi=130)
+    plt.close()
+    return rows
 
 
 # =====================================================================
@@ -328,12 +359,11 @@ def plot_x0_prediction(model, ddpm, x0, run_dir):
         tt = torch.full((1,), t, device=x0.device, dtype=torch.long)
         eps = torch.randn_like(x0)
         x_t = ddpm.q_sample(x0, tt, eps)
-        eps_hat = model(x_t, tt)
-        a_bar = ddpm.alpha_bars[t]
-        x0_hat = (x_t - (1 - a_bar).sqrt() * eps_hat) / a_bar.sqrt()
+        out = model(x_t, ddpm.model_time(tt))         # DDPM: predicted noise, flow: predicted velocity
+        x0_hat = ddpm.predict_x0(model, x_t, t)
         show(col[0], x_t, 1, f"x_t  (t={t})")
-        show(col[1], eps / 3, 1, "true noise")
-        show(col[2], eps_hat / 3, 1, "predicted noise")
+        show(col[1], ddpm.target(x0, eps) / 3, 1, "true target")
+        show(col[2], out / 3, 1, "model output")
         show(col[3], x0_hat, 1, "predicted x_0")
     plt.suptitle("one-step prediction of x_0 from x_t")
     plt.tight_layout()
@@ -371,9 +401,7 @@ def plot_nearest_neighbours(model, ddpm, traj, samples, real, dataset, device, r
     fig, axes = plt.subplots(1, 2 * len(ts), figsize=(2.0 * 2 * len(ts), 9))
     for j, t in enumerate(ts):
         x_t = traj[T - 1 - t].to(device)
-        tt = torch.full((len(x_t),), t, device=device, dtype=torch.long)
-        a_bar = ddpm.alpha_bars[t]
-        x0_hat = ((x_t - (1 - a_bar).sqrt() * model(x_t, tt)) / a_bar.sqrt()).clamp(-1, 1)
+        x0_hat = ddpm.predict_x0(model, x_t, t).clamp(-1, 1)
         nn_img, dist = nearest(x0_hat, train)
         show(axes[2 * j], x0_hat, 1, f"t={t}\nguess x0_hat")
         show(axes[2 * j + 1], nn_img, 1, f"nearest train\nd={dist.mean():.1f}")
@@ -538,10 +566,13 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["train", "test", "all", "identity_curve", "nearest"], required=True,
                    help="all = train then test; identity_curve / nearest = extra experiments on a trained run")
-    p.add_argument("--run_name", default=None, help="default: UNet_<dataset>_<datetime>")
+    p.add_argument("--tag", default=None, help="short label for the run name, e.g. bigmodel or noema")
+    p.add_argument("--run_name", default=None, help="default: S1.2|S2.3_<method>_unet_<dataset>[_<tag>]_<time>")
     p.add_argument("--dataset", choices=list(PRESETS), default="mnist")
     # diffusion
-    p.add_argument("--T", type=int, default=1000)
+    p.add_argument("--method", choices=["ddpm", "flow"], default="ddpm", help="flow = Stage 2.3 flow matching")
+    p.add_argument("--T", type=int, default=None, help="DDPM steps (default 1000) or flow Euler steps (default 100)")
+    p.add_argument("--fm_steps", default="5,10,20,50,100", help="flow only: Euler steps for the FID sweep")
     # model (None -> use PRESETS)
     p.add_argument("--base_ch", type=int, default=None)
     p.add_argument("--ch_mults", default=None, help="e.g. 1,2,2")
@@ -570,10 +601,13 @@ def main():
     for k, v in PRESETS[args.dataset].items():
         if getattr(args, k) is None:
             setattr(args, k, v)
+    if args.T is None:
+        args.T = 100 if args.method == "flow" else 1000
     if args.run_name is None:
         if args.mode in ("test", "identity_curve", "nearest"):
             p.error(f"--run_name is required for {args.mode}")
-        args.run_name = make_run_name("UNet", args.dataset)
+        stage = "S2.3" if args.method == "flow" else "S1.2"
+        args.run_name = make_run_name(stage, args.method, "unet", args.dataset, args.tag)
 
     set_seed(args.seed)
     device = get_device()

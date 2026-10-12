@@ -132,7 +132,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["test"], default="test", help="only sampling, no training")
     p.add_argument("--ckpt_run", required=True, help="trained Stage 1.2 run to sample from")
-    p.add_argument("--run_name", default=None, help="default: Samplers_<dataset>_<datetime>")
+    p.add_argument("--tag", default=None, help="short label for the run name, e.g. bigmodel or noema")
+    p.add_argument("--run_name", default=None, help="default: S2.1_samplers_unet_<dataset>[_<tag>]_<time>")
     p.add_argument("--steps", default="10,20,50,100,250,1000")
     p.add_argument("--n_grid", type=int, default=4, help="images per cell in same_noise_grid.png")
     p.add_argument("--n_fid", type=int, default=5000, help="0 = skip FID (5000 = same as Stage 1.2)")
@@ -145,7 +146,7 @@ def main():
 
     if args.run_name is None:
         dataset = load_checkpoint(os.path.join(CKPT_DIR, f"{args.ckpt_run}.pt"), "cpu")["config"]["dataset"]
-        args.run_name = make_run_name("Samplers", dataset)
+        args.run_name = make_run_name("S2.1", "samplers", "unet", dataset, args.tag)
 
     set_seed(args.seed)
     device = get_device()

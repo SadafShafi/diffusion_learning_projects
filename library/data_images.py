@@ -1,22 +1,48 @@
 """Image datasets. Downloaded once by prepare.sh into data/ (GPU nodes have no internet).
 Pixels are scaled to [-1, 1], the same range as the Gaussian noise."""
+import glob
+import io
 import os
 
 import torch
-from torch.utils.data import DataLoader
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT, "data")
 
-IMAGE_SHAPE = {"mnist": (1, 28, 28), "cifar10": (3, 32, 32)}
+IMAGE_SHAPE = {"mnist": (1, 28, 28), "cifar10": (3, 32, 32), "celeba": (3, 128, 128)}
 CLASS_NAMES = {
     "mnist": [str(i) for i in range(10)],
     "cifar10": ["plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"],
 }
 
 
+class CelebA(Dataset):
+    """CelebA aligned faces (202,599 images, 178x218) from the parquet files in data/celeba_hf.
+    Centre crop 140x140 (the face), resize to 128x128. The last 10,000 images are our 'test' split."""
+    N_TEST = 10000
+
+    def __init__(self, train=True, size=128):
+        import pyarrow.parquet as pq
+        files = sorted(glob.glob(os.path.join(DATA_DIR, "celeba_hf", "data", "*.parquet")))
+        self.images = [r["bytes"] for f in files for r in pq.read_table(f, columns=["image"]).column("image").to_pylist()]
+        self.images = self.images[:-self.N_TEST] if train else self.images[-self.N_TEST:]
+        tf = [transforms.RandomHorizontalFlip()] if train else []
+        self.tf = transforms.Compose([transforms.CenterCrop(140), transforms.Resize(size), *tf,
+                                      transforms.ToTensor(), transforms.Normalize((0.5,) * 3, (0.5,) * 3)])
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, i):
+        return self.tf(Image.open(io.BytesIO(self.images[i])).convert("RGB")), 0    # 0 = dummy label
+
+
 def get_dataset(name, train=True):
+    if name == "celeba":
+        return CelebA(train=train)
     if name == "mnist":
         tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
         return datasets.MNIST(DATA_DIR, train=train, download=False, transform=tf)

@@ -85,6 +85,16 @@ sbatch --time=04:00:00 train.sh cfg_Sg2_2.py --dataset cifar10
 #   options: --relabel_ts 300,500,700  --relabel_w 3  --n_images 4
 
 
+=====================================================================
+ STAGE 2.3 (project 5)  Flow matching   (same scripts as projects 1 & 2, add --method flow)
+=====================================================================
+sbatch -p grete:interactive --gpus=1g.10gb:1 --time=00:45:00 train.sh ddpm_2d_Sg1_1.py --method flow --dataset spiral
+sbatch -p grete:interactive --gpus=1g.10gb:1 --time=00:45:00 train.sh ddpm_2d_Sg1_1.py --method flow --dataset moons
+sbatch -p grete:interactive --gpus=3g.40gb:1 --time=01:30:00 train.sh ddpm_images_Sg1_2.py --method flow --dataset mnist
+sbatch --time=04:00:00 train.sh ddpm_images_Sg1_2.py --method flow --dataset cifar10
+# runs are named MLPFM_* / UNetFM_*. Extra outputs: flow_few_steps.png (2D), fid_vs_steps.png (images)
+# --T = number of Euler steps for the plots/FID (default 100), --fm_steps = steps for the quality sweep
+
 What to look at in outputs/<run_name>/:
   progress_overview.png   how samples improve during training
   samples.png             real vs generated

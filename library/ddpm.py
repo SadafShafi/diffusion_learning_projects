@@ -42,6 +42,22 @@ class DDPM:
         a_bar = self._gather(self.alpha_bars, t, x0)
         return a_bar.sqrt() * x0 + (1 - a_bar).sqrt() * noise
 
+    # ---------- small helpers (same names in library/flow.py, so plots work for both) ----------
+    def model_time(self, t):
+        """What the network gets as 'time' for integer step t."""
+        return t
+
+    def target(self, x0, noise):
+        """What the network should output: the noise."""
+        return noise
+
+    @torch.no_grad()
+    def predict_x0(self, model, x_t, t_int):
+        """One-step guess of the clean image from the predicted noise."""
+        a = self.alpha_bars[t_int]
+        eps = model(x_t, torch.full((x_t.shape[0],), t_int, device=x_t.device, dtype=torch.long))
+        return (x_t - (1 - a).sqrt() * eps) / a.sqrt()
+
     # ---------- training ----------
     def loss(self, model, x0, y=None, p_uncond=0.0):
         """Pick random t, noise x0, ask the model to predict the noise.
