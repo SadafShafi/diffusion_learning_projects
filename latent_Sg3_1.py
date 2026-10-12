@@ -214,11 +214,74 @@ def test(args, run_dir, device):
 
 
 # =====================================================================
+# 5) SANITY CHECKS: memorisation + VAE ceiling
+# =====================================================================
+@torch.no_grad()
+def sanity(args, run_dir, device):
+    """Is it too good to be true?
+    a) Memorisation: nearest TRAINING latent of each generated latent, compared with real TEST faces
+       (never seen in training). Copies would sit at distance ~0, far below the test faces.
+    b) Ceiling: FID of plain VAE reconstructions of real faces. No generator can beat its decoder."""
+    ckpt = load_checkpoint(os.path.join(CKPT_DIR, f"{args.run_name}.pt"), device)
+    model, fm = build(ckpt["config"], device)
+    model.load_state_dict(ckpt["ema"])
+    model.eval()
+    vae = load_vae(device)
+    train = torch.load(LATENTS).to(device).float().flatten(1)          # (385k, 1024)
+    n = args.n_nn
+
+    gen = torch.cat([fm.sample(model, (min(250, n - i), *LATENT_SHAPE)) for i in range(0, n, 250)])
+    test_set = CelebA(train=False)
+    loader = torch.utils.data.DataLoader(torch.utils.data.Subset(test_set, range(n)), batch_size=250, num_workers=4)
+    test = torch.cat([encode(vae, x.to(device)) for x, _ in loader])
+
+    def nearest(z):
+        d, idx = [], []
+        for c in z.flatten(1).split(250):
+            dist = torch.cdist(c, train)
+            m = dist.min(1)
+            d.append(m.values); idx.append(m.indices)
+        return torch.cat(d), torch.cat(idx)
+
+    d_gen, i_gen = nearest(gen)
+    d_test, _ = nearest(test)
+    out = {"nn_dist_generated": d_gen.mean().item(), "nn_dist_test": d_test.mean().item(),
+           "nn_dist_generated_min": d_gen.min().item(), "nn_dist_test_min": d_test.min().item(), "n": n}
+
+    bins = np.linspace(0, max(d_gen.max().item(), d_test.max().item()), 60)
+    plt.figure(figsize=(8, 4.5))
+    plt.hist(d_test.cpu().numpy(), bins, alpha=0.5, label=f"real test faces, mean {out['nn_dist_test']:.2f}")
+    plt.hist(d_gen.cpu().numpy(), bins, alpha=0.5, label=f"generated, mean {out['nn_dist_generated']:.2f}")
+    plt.xlabel("L2 distance to nearest TRAINING latent")
+    plt.ylabel("count")
+    plt.title("Memorisation check (copies would pile up near 0)")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(run_dir, "nearest_hist.png"), dpi=130)
+    plt.close()
+
+    order = d_gen.argsort()[:12]                     # the 12 most copy-like samples + their training match
+    pairs = torch.stack([gen[order], train[i_gen[order]].view(-1, *LATENT_SHAPE)], 1).flatten(0, 1)
+    save_grid(decode(vae, pairs).cpu(), 8, "12 most copy-like generated | nearest TRAINING face (pairs)",
+              os.path.join(run_dir, "nearest_closest.png"))
+
+    if args.n_fid > 0:                               # FID of VAE reconstructions = best reachable FID
+        fid = FID(device)
+        mu_r, sig_r = fid.real_stats("celeba", CelebA(train=True, flip=False), args.n_fid)
+        sub = torch.utils.data.Subset(CelebA(train=True, flip=False), range(len(CelebA(train=True)) - args.n_fid, len(CelebA(train=True))))
+        feats = [fid.features(decode(vae, encode(vae, x.to(device))))
+                 for x, _ in torch.utils.data.DataLoader(sub, batch_size=250, num_workers=4)]
+        out["fid_vae_reconstruction"] = FID.score(mu_r, sig_r, *FID.stats(np.concatenate(feats)))
+    json.dump(out, open(os.path.join(run_dir, "sanity.json"), "w"), indent=2)
+    print(json.dumps(out, indent=2))
+
+
+# =====================================================================
 # MAIN
 # =====================================================================
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--mode", choices=["vae_check", "encode", "train", "test", "all"], required=True)
+    p.add_argument("--mode", choices=["vae_check", "encode", "train", "test", "all", "sanity"], required=True)
     p.add_argument("--tag", default=None, help="short label for the run name")
     p.add_argument("--run_name", default=None, help="default: S3.1_<mode>_..._celeba[_<tag>]_<time>")
     p.add_argument("--T", type=int, default=100, help="Euler steps for samples/plots")
@@ -241,12 +304,13 @@ def main():
     p.add_argument("--n_fid", type=int, default=5000)
     p.add_argument("--fm_steps", default="10,20,50,100", help="Euler steps for the FID sweep")
     p.add_argument("--sample_batch", type=int, default=250)
+    p.add_argument("--n_nn", type=int, default=2000, help="sanity: samples for the memorisation check")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
 
     if args.run_name is None:
-        if args.mode == "test":
-            p.error("--run_name is required for test")
+        if args.mode in ("test", "sanity"):
+            p.error(f"--run_name is required for {args.mode}")
         what = {"vae_check": ("vaecheck", "sdvae")}.get(args.mode, ("flow", "latentunet"))
         args.run_name = make_run_name("S3.1", *what, "celeba", args.tag)
 
@@ -270,6 +334,8 @@ def main():
         train(args, run_dir, device)
     if args.mode in ("test", "all"):
         test(args, run_dir, device)
+    if args.mode == "sanity":
+        sanity(args, run_dir, device)
 
 
 if __name__ == "__main__":
