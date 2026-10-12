@@ -8,6 +8,47 @@ The project includes:
 - DDPMs on MNIST and CIFAR-10 images
 - DDIM, Euler, and Heun samplers
 - Class conditioning and classifier-free guidance
+- Flow matching on 2D data, MNIST, and CIFAR-10
+- VAE reconstruction and latent-space checks
+
+## Latest results
+
+The most recent experiments compare flow matching with the earlier DDPM
+experiments and begin the move toward latent diffusion.
+
+### Flow matching
+
+An MLP flow-matching model was trained on both spiral and two-moons data. With
+100 Euler steps, the final Chamfer distance was **0.0380** for the spiral and
+**0.0508** for the two-moons dataset. The distance decreases substantially as
+the number of sampling steps increases, showing the effect of ODE solver
+resolution.
+
+![Flow matching on two moons](outputs/MLPFM_moons_20261011-214721/samples.png)
+
+Flow matching was also tested with U-Nets on image datasets:
+
+| Dataset | Training steps | FID |
+| --- | ---: | ---: |
+| MNIST | 20,000 | **4.94** |
+| CIFAR-10 | 100,000 | **25.53** |
+
+For the CIFAR-10 flow-matching model, the Euler sampler reached an FID of
+**25.91** with 100 steps, compared with **60.84** with only 5 steps.
+
+![Flow matching on MNIST](outputs/UNetFM_mnist_20261011-210553/samples.png)
+
+![Flow matching on CIFAR-10](outputs/UNetFM_cifar10_20261011-214920/samples.png)
+
+### VAE reconstruction check
+
+The first latent-diffusion preparation experiment evaluated a pretrained
+Stable Diffusion VAE on CelebA face images. Images were encoded from
+`3 x 128 x 128` pixels to `4 x 16 x 16` latent representations and decoded
+again. The reconstruction achieved **28.2 dB PSNR**, with latent mean **0.061**
+and standard deviation **0.900**.
+
+![VAE reconstruction](outputs/S3.1_vaecheck_sdvae_celeba_20261012-0901/vae_reconstruction.png)
 
 ## Experiments completed so far
 

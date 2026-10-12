@@ -44,6 +44,8 @@ OUT_DIR = "outputs"
 PRESETS = {
     "mnist":   dict(base_ch=32, ch_mults="1,2,2", attn_levels="2",   steps=20000,  sample_every=2000),
     "cifar10": dict(base_ch=64, ch_mults="1,2,2", attn_levels="1,2", steps=100000, sample_every=10000),
+    # Stage 3.1 pixel-space baseline: 128x128 -> 64 -> 32 -> 16, attention at 16x16
+    "celeba":  dict(base_ch=64, ch_mults="1,2,2,2", attn_levels="3", steps=100000, sample_every=5000),
 }
 
 
@@ -119,13 +121,17 @@ def train(args, run_dir, device):
         if step % 500 == 0 or step == 1:
             print(f"step {step:7d} | loss {np.mean(losses[-500:]):.4f} | {step / (time.time() - t0):.1f} it/s", flush=True)
 
-        if step % args.sample_every == 0 or step == args.steps:
+        out_of_time = args.time_limit_min is not None and (time.time() - t0) / 60 > args.time_limit_min
+        if step % args.sample_every == 0 or step == args.steps or out_of_time:
             x = sample_fixed_noise(ddpm, ema, 16, shape).cpu()
             save_grid(x, 4, f"EMA samples at step {step}", os.path.join(progress_dir, f"step_{step:07d}.png"))
             progress.append((step, x[:8]))
             save_checkpoint(ckpt_path, model, config, losses, ema=ema.state_dict(), step=step,
                             train_minutes=(time.time() - t0) / 60)
             print(f"  saved samples + checkpoint at step {step}", flush=True)
+        if out_of_time:
+            print(f"time limit of {args.time_limit_min} min reached at step {step}", flush=True)
+            break
 
     plot_loss(losses, run_dir)
     plot_progress(progress, run_dir)
@@ -171,7 +177,9 @@ def test(args, run_dir, device):
 
     _, traj = ddpm.sample(model, (8, *shape), return_trajectory=True)
     plot_reverse_process(traj, ddpm.T, run_dir)
-    nn_results = plot_nearest_neighbours(model, ddpm, traj, samples_all, real_all, config["dataset"], device, run_dir)
+    nn_results = {}
+    if config["dataset"] != "celeba":      # 200k faces at 128x128 don't fit in memory for the NN search
+        nn_results = plot_nearest_neighbours(model, ddpm, traj, samples_all, real_all, config["dataset"], device, run_dir)
     plot_input_output_grid(model, ddpm, real[:8].to(device), run_dir)
     plot_x0_prediction(model, ddpm, real[:1].to(device), run_dir)
     print(f"saved plots -> {run_dir}")
@@ -581,6 +589,7 @@ def main():
     p.add_argument("--dropout", type=float, default=0.1)
     # training
     p.add_argument("--steps", type=int, default=None)
+    p.add_argument("--time_limit_min", type=float, default=None, help="stop training after this many minutes")
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--warmup", type=int, default=1000)

@@ -24,12 +24,13 @@ class CelebA(Dataset):
     Centre crop 140x140 (the face), resize to 128x128. The last 10,000 images are our 'test' split."""
     N_TEST = 10000
 
-    def __init__(self, train=True, size=128):
+    def __init__(self, train=True, size=128, flip=None):
         import pyarrow.parquet as pq
         files = sorted(glob.glob(os.path.join(DATA_DIR, "celeba_hf", "data", "*.parquet")))
         self.images = [r["bytes"] for f in files for r in pq.read_table(f, columns=["image"]).column("image").to_pylist()]
         self.images = self.images[:-self.N_TEST] if train else self.images[-self.N_TEST:]
-        tf = [transforms.RandomHorizontalFlip()] if train else []
+        flip = train if flip is None else flip
+        tf = [transforms.RandomHorizontalFlip()] if flip else []
         self.tf = transforms.Compose([transforms.CenterCrop(140), transforms.Resize(size), *tf,
                                       transforms.ToTensor(), transforms.Normalize((0.5,) * 3, (0.5,) * 3)])
 
