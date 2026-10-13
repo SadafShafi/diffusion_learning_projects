@@ -116,6 +116,23 @@ sbatch --mem=48G --time=04:00:00 train.sh latent_Sg3_1.py --arch dit --patch 4  
 # size: --dim 384 --depth 8 --heads 6 (default, ~22M = same as the latent U-Net)
 # architecture diagram: viz/DiT_celeba_latent_p2.png
 
+=====================================================================
+ STAGE 3.3 (project 8)  Taking apart Stable Diffusion 1.5   (sd_Sg3_3.py)
+=====================================================================
+# diagrams (CPU):  python -m library.viz_sd   -> viz/StableDiffusion_system.png, viz/StableDiffusion_unet.png
+# everything (our sampler + CFG, img2img, inpainting, LoRA), ~30 min on a 3g slice:
+sbatch -p grete:interactive --gpus=3g.40gb:1 --mem=32G --time=01:30:00 test.sh sd_Sg3_3.py --mode all
+# single parts: --mode generate | img2img | inpaint | lora   (LoRA options: --lora_steps --lora_rank --lora_prompt)
+
+=====================================================================
+ STAGE 4.1 (project 9)  Fast sampling: progressive distillation on CIFAR-10   (distill_Sg4_1.py)
+=====================================================================
+# round 0: eps-teacher (Stage 1.2) -> v-teacher;  rounds: 256 -> 128 -> ... -> 1 steps (~2.5 h + ~30 min test)
+sbatch --time=05:00:00 train.sh distill_Sg4_1.py
+# re-test: sbatch test.sh distill_Sg4_1.py --run_name <run>
+# options: --teacher_run <cifar run> --start_steps 256 --v_steps 20000 --round_steps 10000 --n_fid 5000
+# outputs: fid_vs_steps.png, same_noise_grid.png, test_input_output.png, test_mse.png, progress/round_<N>.png
+
 What to look at in outputs/<run_name>/:
   progress_overview.png   how samples improve during training
   samples.png             real vs generated

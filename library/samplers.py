@@ -38,11 +38,12 @@ def _t(x, t):
 
 
 @torch.no_grad()
-def ddim(model, ddpm, z, n_steps, eta=0.0, t_start=None):
+def ddim(model, ddpm, z, n_steps, eta=0.0, t_start=None, ts=None):
     """z: starting noise x_T. Returns the generated images.
-    t_start: start from a partly noised image z = x_{t_start} instead of pure noise (img2img)."""
+    t_start: start from a partly noised image z = x_{t_start} instead of pure noise (img2img).
+    ts: optional explicit list of timesteps (overrides n_steps / t_start), e.g. to match another library."""
     ab = ddpm.alpha_bars
-    ts = timesteps(ddpm.T, n_steps, t_start)
+    ts = timesteps(ddpm.T, n_steps, t_start) if ts is None else [int(t) for t in ts]
     x = z
     for i, t in enumerate(ts):
         a_t = ab[t]
