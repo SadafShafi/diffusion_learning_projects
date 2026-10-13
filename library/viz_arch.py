@@ -183,6 +183,91 @@ def draw_unet(name, model, inputs, out_dir):
     plt.close()
 
 
+# =====================================================================
+# DiT: token pipeline (left) + zoom into one adaLN-Zero block (right)
+# =====================================================================
+def draw_dit(name, model, inputs, out_dir):
+    from matplotlib.patches import FancyBboxPatch
+    C, H, W = inputs[0].shape[1:]
+    p, g = model.patch, model.grid
+    blk = model.blocks[0]
+    dim = blk.norm1.normalized_shape[0]
+    heads, mlp_h, depth = blk.attn.heads, blk.mlp[0].out_features, len(model.blocks)
+
+    fig, ax = plt.subplots(figsize=(17, 11))
+    ax.set_xlim(0, 17)
+    ax.set_ylim(0, 11)
+    ax.axis("off")
+
+    def box(x, y, text, fc, w=4.6, h=0.8, ec="gray", lw=1, fs=9):
+        ax.add_patch(FancyBboxPatch((x - w / 2, y - h / 2), w, h, boxstyle="round,pad=0.04", fc=fc, ec=ec, lw=lw))
+        ax.text(x, y, text, ha="center", va="center", fontsize=fs, family="monospace")
+
+    def arrow(x1, y1, x2, y2, color="gray", ls="-", text=""):
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1), arrowprops=dict(arrowstyle="-|>", color=color, lw=1.4, ls=ls))
+        if text:
+            ax.text((x1 + x2) / 2 + 0.08, (y1 + y2) / 2, text, fontsize=8, color=color, va="center")
+
+    COND = "#f8bbd0"
+    # ---------------- left: the pipeline ----------------
+    X = 3.0
+    ys = [10.2, 8.9, 7.6, 5.6, 3.6, 2.3]
+    box(X, ys[0], f"input: noisy latent  {C} x {H} x {W}", "white")
+    box(X, ys[1], f"patchify: {p}x{p} conv, stride {p}  ({nparams(model.patch_embed):,} p)\n"
+                  f"-> {g}x{g} = {g * g} tokens of size {dim}", "#c8e6c9", h=0.9)
+    box(X, ys[2], f"+ fixed 2D sin-cos position embedding\n(each token knows where its patch is)", "#c8e6c9", h=0.9)
+    box(X, ys[3], f"{depth} x DiT block (adaLN-Zero)\n{depth} x {nparams(blk):,} = {nparams(model.blocks):,} p\n"
+                  f"tokens stay {g * g} x {dim}", "#ffe0b2", h=1.3, ec="darkorange", lw=2)
+    box(X, ys[4], f"final layer: LN + adaLN (shift, scale)\n+ Linear {dim} -> {p}*{p}*{C} = {p * p * C}  "
+                  f"({nparams(model.final_adaLN) + nparams(model.final_linear):,} p)", "#bbdefb", h=0.9)
+    box(X, ys[5], f"unpatchify -> output {C} x {H} x {W}\n(predicted noise / velocity)", "white", h=0.9)
+    for a, b in zip(ys[:-1], ys[1:]):
+        arrow(X, a - 0.45, X, b + 0.5)
+    # condition
+    cy = 6.9
+    box(X + 4.3, cy + 1.2, f"t -> sinusoidal(256) -> MLP\n-> condition c ({dim})\n({nparams(model.time_emb):,} p)",
+        COND, w=3.2, h=1.1)
+    if model.num_classes is not None:
+        ax.text(X + 4.3, cy + 0.45, f"+ class embedding ({model.num_classes}+1 null)", ha="center", fontsize=8)
+    arrow(X + 4.3, cy + 0.65, X + 2.35, ys[3] + 0.2, color="deeppink", ls="--", text="c")
+    arrow(X + 4.3, cy + 0.65, X + 2.35, ys[4] + 0.2, color="deeppink", ls="--")
+    ax.text(X, 0.9, f"{name}: {nparams(model):,} parameters  |  {g * g} tokens  |  patch {p}  |  "
+                    f"{heads} heads", ha="center", fontsize=11)
+
+    # ---------------- right: one block ----------------
+    XB = 12.6
+    ax.add_patch(FancyBboxPatch((9.3, 0.5), 7.4, 10.3, boxstyle="round,pad=0.05", fc="#fff8ef", ec="darkorange", lw=2))
+    ax.text(XB, 10.5, "inside ONE DiT block (adaLN-Zero)", ha="center", fontsize=12, color="darkorange")
+    box(XB, 9.65, f"c -> SiLU -> Linear({dim} -> 6x{dim})   ({nparams(blk.adaLN):,} p, starts at 0)\n"
+                  f"= shift1 scale1 gate1 | shift2 scale2 gate2", COND, w=6.9, h=0.85)
+    yb = [8.5, 7.6, 6.7, 5.8, 4.9, 3.6, 2.7, 1.8, 0.95]
+    labels = [("x  (tokens)", "white"),
+              ("LayerNorm (no own gamma/beta)", "#e3f2fd"),
+              ("x (1 + scale1) + shift1", COND),
+              (f"self-attention, {heads} heads  ({nparams(blk.attn):,} p)", "#ffe0b2"),
+              ("x gate1   ->   + residual", COND),
+              ("LayerNorm", "#e3f2fd"),
+              ("x (1 + scale2) + shift2", COND),
+              (f"MLP {dim} -> {mlp_h} -> {dim}, GELU  ({nparams(blk.mlp):,} p)", "#ffe0b2"),
+              ("x gate2   ->   + residual  ->  x out", COND)]
+    for (t, fc), y in zip(labels, yb):
+        box(XB, y, t, fc, w=5.2, h=0.6)
+    for a, b in zip(yb[:-1], yb[1:]):
+        arrow(XB, a - 0.3, XB, b + 0.3)
+    # residual connections
+    for top, bottom in [(yb[0], yb[4]), (yb[4], yb[8])]:
+        ax.plot([XB - 2.75, XB - 3.0, XB - 3.0, XB - 2.75], [top, top, bottom, bottom], color="tab:purple", lw=1.5)
+    ax.text(XB - 3.15, (yb[0] + yb[4]) / 2, "residual", rotation=90, color="tab:purple", va="center", fontsize=8)
+    ax.text(XB - 3.15, (yb[4] + yb[8]) / 2, "residual", rotation=90, color="tab:purple", va="center", fontsize=8)
+    # condition feeds the modulation boxes
+    for y in (yb[2], yb[4], yb[6], yb[8]):
+        ax.annotate("", xy=(XB + 2.65, y), xytext=(XB + 3.4, 9.25),
+                    arrowprops=dict(arrowstyle="-|>", color="deeppink", lw=1, ls="--"))
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, f"{name}.png"), dpi=130)
+    plt.close()
+
+
 def refresh(force=False):
     """Redraw all architectures if library/models.py changed since last time."""
     os.makedirs(VIZ_DIR, exist_ok=True)
@@ -196,6 +281,9 @@ def refresh(force=False):
         if isinstance(model, models.UNet):
             draw_unet(name, model, inputs, VIZ_DIR)                    # U-shaped block diagram
             draw(name, rows, inputs, total, VIZ_DIR, suffix="_layers")  # full per-layer list
+        elif isinstance(model, models.DiT):
+            draw_dit(name, model, inputs, VIZ_DIR)                     # token pipeline + one block
+            draw(name, rows, inputs, total, VIZ_DIR, suffix="_layers")
         else:
             draw(name, rows, inputs, total, VIZ_DIR)
         with open(os.path.join(VIZ_DIR, f"{name}.txt"), "w") as f:

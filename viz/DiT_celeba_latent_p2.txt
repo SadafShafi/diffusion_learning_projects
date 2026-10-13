@@ -1,0 +1,36 @@
+DiT(
+  (patch_embed): Conv2d(4, 384, kernel_size=(2, 2), stride=(2, 2))
+  (time_emb): Sequential(
+    (0): SinusoidalTimeEmbedding()
+    (1): Linear(in_features=256, out_features=384, bias=True)
+    (2): SiLU()
+    (3): Linear(in_features=384, out_features=384, bias=True)
+  )
+  (blocks): ModuleList(
+    (0-7): 8 x DiTBlock(
+      (norm1): LayerNorm((384,), eps=1e-06, elementwise_affine=False)
+      (attn): SelfAttention(
+        (qkv): Linear(in_features=384, out_features=1152, bias=True)
+        (proj): Linear(in_features=384, out_features=384, bias=True)
+      )
+      (norm2): LayerNorm((384,), eps=1e-06, elementwise_affine=False)
+      (mlp): Sequential(
+        (0): Linear(in_features=384, out_features=1536, bias=True)
+        (1): GELU(approximate='tanh')
+        (2): Linear(in_features=1536, out_features=384, bias=True)
+      )
+      (adaLN): Sequential(
+        (0): SiLU()
+        (1): Linear(in_features=384, out_features=2304, bias=True)
+      )
+    )
+  )
+  (final_norm): LayerNorm((384,), eps=1e-06, elementwise_affine=False)
+  (final_adaLN): Sequential(
+    (0): SiLU()
+    (1): Linear(in_features=384, out_features=768, bias=True)
+  )
+  (final_linear): Linear(in_features=384, out_features=16, bias=True)
+)
+
+Total parameters: 21,834,640

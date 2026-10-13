@@ -95,6 +95,27 @@ sbatch --time=04:00:00 train.sh ddpm_images_Sg1_2.py --method flow --dataset cif
 # runs are named MLPFM_* / UNetFM_*. Extra outputs: flow_few_steps.png (2D), fid_vs_steps.png (images)
 # --T = number of Euler steps for the plots/FID (default 100), --fm_steps = steps for the quality sweep
 
+=====================================================================
+ STAGE 3.1 (project 6)  Latent diffusion on CelebA 128x128   (latent_Sg3_1.py)
+=====================================================================
+# 1) look at the VAE (CPU is fine):            python latent_Sg3_1.py --mode vae_check
+# 2) encode the dataset once (~16 min):
+sbatch -p grete:interactive --gpus=3g.40gb:1 --mem=48G --time=01:00:00 test.sh latent_Sg3_1.py --mode encode
+# 3) train + test the latent U-Net:
+sbatch --mem=48G --time=03:00:00 train.sh latent_Sg3_1.py
+# pixel-space baseline with the same training time:
+sbatch --mem=48G --time=03:00:00 train.sh ddpm_images_Sg1_2.py --method flow --dataset celeba --time_limit_min 70 --sample_batch 250
+# memorisation + VAE-ceiling check:
+sbatch -p grete:interactive --gpus=3g.40gb:1 --mem=48G --time=01:00:00 test.sh latent_Sg3_1.py --run_name <run> --mode sanity
+
+=====================================================================
+ STAGE 3.2 (project 7)  Diffusion Transformer (DiT) on the same latents   (latent_Sg3_1.py --arch dit)
+=====================================================================
+sbatch --mem=48G --time=04:00:00 train.sh latent_Sg3_1.py --arch dit --patch 2     # 64 tokens
+sbatch --mem=48G --time=04:00:00 train.sh latent_Sg3_1.py --arch dit --patch 4     # 16 tokens
+# size: --dim 384 --depth 8 --heads 6 (default, ~22M = same as the latent U-Net)
+# architecture diagram: viz/DiT_celeba_latent_p2.png
+
 What to look at in outputs/<run_name>/:
   progress_overview.png   how samples improve during training
   samples.png             real vs generated

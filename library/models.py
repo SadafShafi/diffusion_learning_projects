@@ -197,6 +197,104 @@ class UNet(nn.Module):
 
 
 # =====================================================================
+# Diffusion Transformer, DiT (Peebles & Xie, 2023)   (Stage 3, project 7)
+# =====================================================================
+def sincos_2d(dim, grid):
+    """Fixed 2D sin-cos position embedding (grid*grid, dim): half the dims encode the row, half the column."""
+    def sincos_1d(d, pos):
+        omega = 1.0 / 10000 ** (torch.arange(d // 2, dtype=torch.float32) / (d / 2))
+        out = pos[:, None] * omega[None]
+        return torch.cat([out.sin(), out.cos()], dim=1)
+    rows, cols = torch.meshgrid(torch.arange(grid), torch.arange(grid), indexing="ij")
+    return torch.cat([sincos_1d(dim // 2, rows.flatten().float()), sincos_1d(dim // 2, cols.flatten().float())], dim=1)
+
+
+def modulate(x, shift, scale):
+    """adaLN: normalised tokens are scaled and shifted with numbers computed from the condition."""
+    return x * (1 + scale[:, None]) + shift[:, None]
+
+
+class SelfAttention(nn.Module):
+    """Multi-head self-attention over tokens:  softmax(Q K^T / sqrt(d)) V   per head."""
+
+    def __init__(self, dim, heads):
+        super().__init__()
+        self.heads = heads
+        self.qkv = nn.Linear(dim, 3 * dim)
+        self.proj = nn.Linear(dim, dim)
+
+    def forward(self, x):
+        B, N, D = x.shape
+        q, k, v = self.qkv(x).reshape(B, N, 3, self.heads, D // self.heads).permute(2, 0, 3, 1, 4)  # (B, heads, N, d)
+        out = F.scaled_dot_product_attention(q, k, v)
+        return self.proj(out.transpose(1, 2).reshape(B, N, D))
+
+
+class DiTBlock(nn.Module):
+    """Transformer block with adaLN-Zero conditioning. From the condition c it computes 6 vectors:
+        x = x + gate1 * Attention( LN(x) * (1 + scale1) + shift1 )
+        x = x + gate2 * MLP(       LN(x) * (1 + scale2) + shift2 )
+    The layer producing them is initialised to ZERO -> gates start at 0 -> every block starts as the identity."""
+
+    def __init__(self, dim, heads, mlp_ratio=4.0):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)   # no own gamma/beta: adaLN provides them
+        self.attn = SelfAttention(dim, heads)
+        self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        self.mlp = nn.Sequential(nn.Linear(dim, int(dim * mlp_ratio)), nn.GELU(approximate="tanh"),
+                                 nn.Linear(int(dim * mlp_ratio), dim))
+        self.adaLN = nn.Sequential(nn.SiLU(), nn.Linear(dim, 6 * dim))
+        nn.init.zeros_(self.adaLN[1].weight)
+        nn.init.zeros_(self.adaLN[1].bias)
+
+    def forward(self, x, c):
+        shift1, scale1, gate1, shift2, scale2, gate2 = self.adaLN(c).chunk(6, dim=1)
+        x = x + gate1[:, None] * self.attn(modulate(self.norm1(x), shift1, scale1))
+        x = x + gate2[:, None] * self.mlp(modulate(self.norm2(x), shift2, scale2))
+        return x
+
+
+class DiT(nn.Module):
+    """
+    latent (C, H, W) --patchify--> N = (H/p)^2 tokens of size dim --+ 2D position embedding
+        --> depth x DiTBlock (each conditioned on c = time embedding [+ class embedding])
+        --> final adaLN + Linear: each token -> a p x p x C patch --unpatchify--> output (C, H, W)
+    Same call as the U-Net: model(x, t, y=None) -> predicted noise / velocity.
+    """
+
+    def __init__(self, in_ch=4, input_size=16, patch=2, dim=384, depth=8, heads=6, num_classes=None):
+        super().__init__()
+        self.in_ch, self.patch, self.grid = in_ch, patch, input_size // patch
+        self.num_classes = num_classes
+        self.patch_embed = nn.Conv2d(in_ch, dim, kernel_size=patch, stride=patch)   # each p x p patch -> 1 token
+        self.register_buffer("pos_emb", sincos_2d(dim, self.grid)[None], persistent=False)
+        self.time_emb = nn.Sequential(SinusoidalTimeEmbedding(256), nn.Linear(256, dim), nn.SiLU(), nn.Linear(dim, dim))
+        if num_classes is not None:
+            self.class_emb = nn.Embedding(num_classes + 1, dim)                       # +1 = null class (CFG)
+        self.blocks = nn.ModuleList([DiTBlock(dim, heads) for _ in range(depth)])
+        self.final_norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        self.final_adaLN = nn.Sequential(nn.SiLU(), nn.Linear(dim, 2 * dim))
+        self.final_linear = nn.Linear(dim, patch * patch * in_ch)
+        for layer in (self.final_adaLN[1], self.final_linear):                     # output starts at 0
+            nn.init.zeros_(layer.weight)
+            nn.init.zeros_(layer.bias)
+
+    def forward(self, x, t, y=None):
+        B = x.shape[0]
+        h = self.patch_embed(x).flatten(2).transpose(1, 2) + self.pos_emb          # (B, N, dim)
+        c = self.time_emb(t)                                                       # the condition
+        if self.num_classes is not None:
+            y = torch.full((B,), self.num_classes, device=x.device, dtype=torch.long) if y is None else y
+            c = c + self.class_emb(y)
+        for block in self.blocks:
+            h = block(h, c)
+        shift, scale = self.final_adaLN(c).chunk(2, dim=1)
+        h = self.final_linear(modulate(self.final_norm(h), shift, scale))         # (B, N, p*p*C)
+        p, g, C = self.patch, self.grid, self.in_ch                                # unpatchify
+        return h.reshape(B, g, g, p, p, C).permute(0, 5, 1, 3, 2, 4).reshape(B, C, g * p, g * p)
+
+
+# =====================================================================
 # Helper classifier (only used to measure things, not for generation)
 # =====================================================================
 class MNISTClassifier(nn.Module):
@@ -229,5 +327,10 @@ ARCHITECTURES = {
                           lambda: (torch.randn(2, 3, 32, 32), torch.randint(0, 1000, (2,)))),
     "UNet_mnist_cond": (lambda: UNet(in_ch=1, base_ch=32, ch_mults=(1, 2, 2), attn_levels=(2,), num_classes=10),
                         lambda: (torch.randn(2, 1, 28, 28), torch.randint(0, 1000, (2,)))),
+    # Stage 3 (latent CelebA, 4x16x16): keep in sync with latent_Sg3_1.py defaults
+    "UNet_celeba_latent": (lambda: UNet(in_ch=4, base_ch=128, ch_mults=(1, 2, 2), attn_levels=(1, 2)),
+                           lambda: (torch.randn(2, 4, 16, 16), torch.randint(0, 1000, (2,)))),
+    "DiT_celeba_latent_p2": (lambda: DiT(in_ch=4, input_size=16, patch=2, dim=384, depth=8, heads=6),
+                             lambda: (torch.randn(2, 4, 16, 16), torch.randint(0, 1000, (2,)))),
     "MNISTClassifier": (lambda: MNISTClassifier(), lambda: (torch.randn(2, 1, 28, 28),)),
 }

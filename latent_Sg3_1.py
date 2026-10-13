@@ -1,5 +1,5 @@
 """
-Stage 3, project 6 - Latent diffusion on CelebA faces (128x128) with the pretrained Stable Diffusion VAE.
+Stage 3, projects 6 + 7 - Latent diffusion on CelebA faces (128x128) with the pretrained Stable Diffusion VAE.
 
 Idea: don't diffuse 3x128x128 pixels. Compress each face with a pretrained VAE to a 4x16x16 latent
 (48x fewer numbers), train the diffusion model on latents, decode the generated latents back to faces.
@@ -12,7 +12,8 @@ Modes, in this order:
 
     python latent_Sg3_1.py --mode vae_check
     python latent_Sg3_1.py --mode encode
-    python latent_Sg3_1.py --mode all
+    python latent_Sg3_1.py --mode all                       (U-Net, project 6)
+    python latent_Sg3_1.py --mode all --arch dit            (Diffusion Transformer, project 7)
 """
 import argparse
 import copy
@@ -29,7 +30,7 @@ import torch
 from ddpm_images_Sg1_2 import ints, update_ema, show, save_grid, plot_loss, CKPT_DIR, OUT_DIR   # Stage 1.2 helpers
 from library.data_images import DATA_DIR, CelebA
 from library.flow import FlowMatching
-from library.models import UNet
+from library.models import UNet, DiT
 from library.vae import load_vae, encode, decode
 from library.fid import FID
 from library.utils import get_device, set_seed, save_checkpoint, load_checkpoint, make_run_name
@@ -40,8 +41,13 @@ LATENT_SHAPE = (4, 16, 16)
 
 
 def build(config, device):
-    model = UNet(in_ch=4, base_ch=config["base_ch"], ch_mults=ints(config["ch_mults"]), n_res=config["n_res"],
-                 attn_levels=ints(config["attn_levels"]), dropout=config["dropout"]).to(device)
+    """--arch unet (Stage 3.1) or dit (Stage 3.2, Diffusion Transformer). Everything else is identical."""
+    if config.get("arch", "unet") == "dit":
+        model = DiT(in_ch=4, input_size=LATENT_SHAPE[1], patch=config["patch"], dim=config["dim"],
+                    depth=config["depth"], heads=config["heads"]).to(device)
+    else:
+        model = UNet(in_ch=4, base_ch=config["base_ch"], ch_mults=ints(config["ch_mults"]), n_res=config["n_res"],
+                     attn_levels=ints(config["attn_levels"]), dropout=config["dropout"]).to(device)
     return model, FlowMatching(T=config["T"], device=device)
 
 
@@ -117,7 +123,7 @@ def train(args, run_dir, device):
     print(f"latents: {tuple(latents.shape)}", flush=True)
     model, fm = build(config, device)
     ema = copy.deepcopy(model).eval().requires_grad_(False)
-    print(f"U-Net parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M", flush=True)
+    print(f"{type(model).__name__} parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M", flush=True)
     optim = torch.optim.Adam(model.parameters(), lr=args.lr)
     warmup = torch.optim.lr_scheduler.LambdaLR(optim, lambda s: min(1.0, (s + 1) / args.warmup))
     vae = load_vae(device)                                 # only for the progress pictures
@@ -285,7 +291,13 @@ def main():
     p.add_argument("--tag", default=None, help="short label for the run name")
     p.add_argument("--run_name", default=None, help="default: S3.1_<mode>_..._celeba[_<tag>]_<time>")
     p.add_argument("--T", type=int, default=100, help="Euler steps for samples/plots")
-    # model on 4x16x16 latents: levels 16 -> 8 -> 4, attention at 8x8 and 4x4
+    p.add_argument("--arch", choices=["unet", "dit"], default="unet")
+    # DiT (Stage 3.2): defaults = DiT-S/2 with 8 blocks (~22M params, same size as the U-Net below)
+    p.add_argument("--patch", type=int, default=2, help="DiT patch size: 2 -> 64 tokens, 4 -> 16 tokens")
+    p.add_argument("--dim", type=int, default=384)
+    p.add_argument("--depth", type=int, default=8)
+    p.add_argument("--heads", type=int, default=6)
+    # U-Net on 4x16x16 latents: levels 16 -> 8 -> 4, attention at 8x8 and 4x4
     p.add_argument("--base_ch", type=int, default=128)
     p.add_argument("--ch_mults", default="1,2,2")
     p.add_argument("--attn_levels", default="1,2")
@@ -295,7 +307,7 @@ def main():
     p.add_argument("--steps", type=int, default=100000)
     p.add_argument("--time_limit_min", type=float, default=None, help="stop training after this many minutes")
     p.add_argument("--batch_size", type=int, default=128)
-    p.add_argument("--lr", type=float, default=2e-4)
+    p.add_argument("--lr", type=float, default=None, help="default 2e-4 (U-Net), 1e-4 (DiT, as in the paper)")
     p.add_argument("--warmup", type=int, default=1000)
     p.add_argument("--ema_decay", type=float, default=0.9999)
     p.add_argument("--sample_every", type=int, default=10000)
@@ -307,12 +319,18 @@ def main():
     p.add_argument("--n_nn", type=int, default=2000, help="sanity: samples for the memorisation check")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
+    if args.lr is None:
+        args.lr = 1e-4 if args.arch == "dit" else 2e-4
 
     if args.run_name is None:
         if args.mode in ("test", "sanity"):
             p.error(f"--run_name is required for {args.mode}")
-        what = {"vae_check": ("vaecheck", "sdvae")}.get(args.mode, ("flow", "latentunet"))
-        args.run_name = make_run_name("S3.1", *what, "celeba", args.tag)
+        if args.mode == "vae_check":
+            args.run_name = make_run_name("S3.1", "vaecheck", "sdvae", "celeba", args.tag)
+        elif args.arch == "dit":
+            args.run_name = make_run_name("S3.2", "flow", f"dit-p{args.patch}", "celeba", args.tag)
+        else:
+            args.run_name = make_run_name("S3.1", "flow", "latentunet", "celeba", args.tag)
 
     set_seed(args.seed)
     device = get_device()
