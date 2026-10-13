@@ -50,6 +50,28 @@ and standard deviation **0.900**.
 
 ![VAE reconstruction](outputs/S3.1_vaecheck_sdvae_celeba_20261012-0901/vae_reconstruction.png)
 
+### Latest latent diffusion progress
+
+The project has now moved from pixel-space models to latent flow matching on
+CelebA. Images are encoded with the VAE into `4 x 16 x 16` latent tensors, and
+the flow model is trained in that smaller representation.
+
+| Model | Training steps | FID at 100 Euler steps |
+| --- | ---: | ---: |
+| Pixel-space U-Net baseline | 10,275 | 36.88 |
+| Latent U-Net | 100,000 | **12.48** |
+| Latent DiT, patch size 2 | 100,000 | **13.03** |
+| Latent DiT, patch size 4 | 100,000 | 19.09 |
+
+The latent U-Net currently gives the best CelebA result. The patch-2 DiT is
+close behind, while the patch-4 DiT shows the trade-off between fewer tokens
+and generation quality. For the patch-2 DiT, FID improved from **22.20** at
+10 Euler steps to **13.03** at 100 steps.
+
+![Latent U-Net samples](outputs/S3.1_flow_latentunet_celeba_20261012-1059/samples.png)
+
+![Latent DiT samples](outputs/S3.2_flow_dit-p2_celeba_20261012-1720/samples.png)
+
 ## Experiments completed so far
 
 ### 1. DDPM on 2D toy data
