@@ -1,0 +1,21 @@
+{
+  "mode": "all",
+  "run_name": "UNet_mnist_20261011-120515",
+  "dataset": "mnist",
+  "T": 1000,
+  "base_ch": 32,
+  "ch_mults": "1,2,2",
+  "attn_levels": "2",
+  "n_res": 2,
+  "dropout": 0.1,
+  "steps": 20000,
+  "batch_size": 128,
+  "lr": 0.0002,
+  "warmup": 1000,
+  "ema_decay": 0.9999,
+  "sample_every": 2000,
+  "num_workers": 4,
+  "n_fid": 5000,
+  "sample_batch": 500,
+  "seed": 0
+}

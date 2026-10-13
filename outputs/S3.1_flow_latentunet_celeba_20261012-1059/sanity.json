@@ -1,0 +1,8 @@
+{
+  "nn_dist_generated": 24.07366180419922,
+  "nn_dist_test": 23.682838439941406,
+  "nn_dist_generated_min": 17.41708755493164,
+  "nn_dist_test_min": 0.2724311947822571,
+  "n": 2000,
+  "fid_vae_reconstruction": 6.934539600583008
+}

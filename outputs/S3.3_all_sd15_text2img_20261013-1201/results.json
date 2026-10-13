@@ -1,0 +1,7 @@
+{
+  "max_latent_diff_ours_vs_diffusers_ddim": 0.09300047159194946,
+  "seconds_per_image_30_steps_cfg": 1.4152739346027374,
+  "lora_params_M": 1.594368,
+  "lora_train_minutes": 3.049968711535136,
+  "lora_final_loss": 0.09133406907320023
+}

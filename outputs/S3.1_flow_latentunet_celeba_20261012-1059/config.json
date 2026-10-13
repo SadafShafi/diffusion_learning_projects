@@ -1,0 +1,23 @@
+{
+  "mode": "all",
+  "tag": null,
+  "run_name": "S3.1_flow_latentunet_celeba_20261012-1059",
+  "T": 100,
+  "base_ch": 128,
+  "ch_mults": "1,2,2",
+  "attn_levels": "1,2",
+  "n_res": 2,
+  "dropout": 0.1,
+  "steps": 100000,
+  "time_limit_min": 70.0,
+  "batch_size": 128,
+  "lr": 0.0002,
+  "warmup": 1000,
+  "ema_decay": 0.9999,
+  "sample_every": 10000,
+  "num_workers": 8,
+  "n_fid": 5000,
+  "fm_steps": "10,20,50,100",
+  "sample_batch": 250,
+  "seed": 0
+}

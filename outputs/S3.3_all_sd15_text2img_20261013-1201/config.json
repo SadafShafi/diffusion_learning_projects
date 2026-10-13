@@ -1,0 +1,11 @@
+{
+  "mode": "all",
+  "tag": null,
+  "run_name": "S3.3_all_sd15_text2img_20261013-1201",
+  "lora_prompt": "a photo of sks dog",
+  "lora_rank": 8,
+  "lora_steps": 800,
+  "lora_batch": 4,
+  "lora_lr": 0.0001,
+  "seed": 0
+}

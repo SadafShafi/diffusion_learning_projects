@@ -1,0 +1,12 @@
+{
+  "mode": "test",
+  "ckpt_run": "UNet_cifar10_20261011-115606",
+  "run_name": "Samplers_cifar10_heun",
+  "steps": "10,20,50,100,250,1000",
+  "n_grid": 4,
+  "n_fid": 5000,
+  "fid_samplers": "heun",
+  "heun_max_steps": 250,
+  "sample_batch": 500,
+  "seed": 0
+}

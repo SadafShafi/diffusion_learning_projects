@@ -1,0 +1,18 @@
+{
+  "mode": "all",
+  "teacher_run": "UNet_cifar10_20261011-115606",
+  "tag": null,
+  "run_name": "S4.1_progdistill_unet_cifar10_20261013-1503",
+  "start_steps": 256,
+  "v_steps": 20000,
+  "round_steps": 10000,
+  "batch_size": 128,
+  "lr": 0.0001,
+  "num_workers": 4,
+  "n_fid": 5000,
+  "sample_batch": 500,
+  "n_grid": 4,
+  "n_test": 500,
+  "n_show": 4,
+  "seed": 0
+}

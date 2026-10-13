@@ -1,0 +1,16 @@
+{
+  "mode": "lora",
+  "tag": "noprior",
+  "run_name": "S3.3_lora_sd15_text2img_noprior_20261013-1251",
+  "lora_prompt": "a photo of sks dog",
+  "lora_rank": 8,
+  "lora_steps": 800,
+  "lora_batch": 4,
+  "lora_lr": 0.0001,
+  "prior": false,
+  "class_prompt": "a photo of a dog",
+  "n_class_images": 100,
+  "prior_weight": 1.0,
+  "eval_steps": "100,200,400,800",
+  "seed": 0
+}

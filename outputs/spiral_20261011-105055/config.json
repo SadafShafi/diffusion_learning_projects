@@ -1,0 +1,14 @@
+{
+  "mode": "train",
+  "run_name": "spiral_20261011-105055",
+  "dataset": "spiral",
+  "T": 1000,
+  "hidden": 128,
+  "n_layers": 3,
+  "steps": 20000,
+  "batch_size": 512,
+  "lr": 0.001,
+  "n_data": 50000,
+  "n_samples": 2000,
+  "seed": 0
+}
